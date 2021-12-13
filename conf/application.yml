@@ -1,8 +1,14 @@
-discord:
-    token: your_token_here
-  
+
 twitter:
-    consumer_key: your_consumer_key_here
-    consumer_secret: your_consumer_secret_here
-    access_token: your_access_token_here
-    access_token_secret: your_access_token_secret_here
+    consumer_key: your-token-here
+    consumer_secret: your-token-here
+    access_token: your-token-here
+    access_token_secret: your-token-here
+
+discord: 
+    token: 'your-token-here'
+
+acrcloud:
+    host: identify-eu-west-1.acrcloud.com
+    token: your-token-here
+    secret_token: your-token-here
