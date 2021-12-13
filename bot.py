@@ -1,41 +1,54 @@
 import asyncio
+import calendar
 import functools
+import io
 import itertools
-import random
+import json
 import math
 import os
-import discord
+import random
 import re
-import urllib.request
-import youtube_dl
-import tweepy
-import json
 import sys
-import pyttsx3
+import locale
+import threading
 import time
+import tkinter
+import tkinter.scrolledtext as ScrolledText
+import urllib.request
+from datetime import datetime
+from os import error, system
+from random import choice, randint
+from threading import Thread
+from tkinter import *
+from tkinter import ttk
+
 import audioread
-import pytesseract
-import io
-import requests
-import yaml
-import numpy
-
-import matplotlib.pyplot as plt
+import cv2
+import discord
 import matplotlib.image as mpimg
-
-from googletrans import Translator
-from PIL import Image
-from googlesearch import search as googleSearch
-from tinytag import TinyTag
-from random import choice
-from discord.ext.commands import check
-from discord.ext import commands
+import matplotlib.pyplot as plt
+import numpy as np
+import PIL
+import PIL.Image
+import pytesseract
+import pyttsx3
+import requests
+import tweepy
+import win32con
+import win32gui
+import yaml
+import youtube_dl
+#from acrcloud.recognizer import ACRCloudRecognizer
 from async_timeout import timeout
 from discord.ext import commands, tasks
-from random import randint
-from os import system
+from discord.ext.commands import CommandNotFound, check
 from discord.utils import get
-from discord.ext.commands import CommandNotFound
+from googlesearch import search as googleSearch
+from googletrans import Translator
+from tinytag import TinyTag
+from win32 import win32api, win32gui, win32process
+
+locale.setlocale(locale.LC_ALL, 'pt_BR.UTF-8')
 
 youtube_dl.utils.bug_reports_message = lambda: ''
 
@@ -50,11 +63,160 @@ idioma = ''
 
 safeConf = yaml.safe_load(open('conf/application.yml'))
 
-pytesseract.pytesseract.tesseract_cmd = r'D:\Program Files (x86)\Tesseract-OCR\tesseract.exe'
+url = 'https://api.exchangerate-api.com/v4/latest/USD'
+
+pytesseract.pytesseract.tesseract_cmd = 'D:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe'
 
 translator = Translator()
 
 bugado = False
+
+hdr = {'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.64 Safari/537.11',
+       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+       'Accept-Charset': 'ISO-8859-1,utf-8;q=0.7,*;q=0.3',
+       'Accept-Encoding': 'none',
+       'Accept-Language': 'en-US,en;q=0.8',
+       'Connection': 'keep-alive'}
+
+
+def video_song_finder():
+  # API vars
+    acr_config = {
+        'host': safeConf['acrcloud']['host'],
+        'access_key': safeConf['acrcloud']['token'],
+        'access_secret': safeConf['acrcloud']['secret_token'],
+        'timeout': 10
+    }
+    # ACR object
+    acr = ACRCloudRecognizer(acr_config)
+
+    # recognize, 0s offset from start
+    result = eval(acr.recognize_by_file('video.mp4', 0))
+
+    if result['status']['msg'] == 'Success':
+        # Recognized the song
+        print("success")
+
+        # extract the metadata/details
+        metadata = result['metadata']
+        all_finds = metadata['music']
+        best_find = all_finds[0]
+        title = best_find['title']
+        
+        artist = best_find['artists'][0]['name']
+        # if more than artist then we need to append
+        if len(best_find['artists']) > 1:
+            for index in range(1, len(best_find['artists'])):
+                artist += ", " + best_find['artists'][index]['name']
+
+        # get youtube video link if possible
+        youtube = ""
+        try:
+            for listing in all_finds:
+                if 'youtube' in listing['external_metadata']:
+                    youtube = 'https://www.youtube.com/watch?v=' + listing['external_metadata']['youtube']['vid']
+        except:
+            youtube = ""
+
+        # get spotify link if possible
+        spotify = ""
+        try:
+            for listing in all_finds:
+                if 'spotify' in listing['external_metadata']:
+                    spotify = 'https://open.spotify.com/track/' + listing['external_metadata']['spotify']['track']['id']
+        except:
+            spotify = ""
+
+
+
+def get_grayscale(image):
+    return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+# noise removal
+def remove_noise(image):
+    return cv2.medianBlur(image,5)
+ 
+#thresholding
+def thresholding(image):
+    return cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]
+
+#dilation
+def dilate(image):
+    kernel = np.ones((5,5),np.uint8)
+    return cv2.dilate(image, kernel, iterations = 1)
+    
+#erosion
+def erode(image):
+    kernel = np.ones((5,5),np.uint8)
+    return cv2.erode(image, kernel, iterations = 1)
+
+#opening - erosion followed by dilation
+def opening(image):
+    kernel = np.ones((5,5),np.uint8)
+    return cv2.morphologyEx(image, cv2.MORPH_OPEN, kernel)
+
+#canny edge detection
+def canny(image):
+    return cv2.Canny(image, 100, 200)
+
+#skew correction
+def deskew(image):
+    coords = np.column_stack(np.where(image > 0))
+    angle = cv2.minAreaRect(coords)[-1]
+    if angle < -45:
+        angle = -(90 + angle)
+    else:
+        angle = -angle
+    (h, w) = image.shape[:2]
+    center = (w // 2, h // 2)
+    M = cv2.getRotationMatrix2D(center, angle, 1.0)
+    rotated = cv2.warpAffine(image, M, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+    return rotated
+
+#template matching
+def match_template(image, template):
+
+    return cv2.matchTemplate(image, template, cv2.TM_CCOEFF_NORMED) 
+
+hidden = False
+
+def clear():
+    os.system('cls' if os.name == 'nt' else 'clear')
+
+def callback(hwnd, pid):
+    global hidden
+    if win32process.GetWindowThreadProcessId(hwnd)[1] == pid:
+        win32gui.ShowWindow(hwnd, hidden)
+
+def HideUnHide():
+    global hidden
+    win32gui.EnumWindows(callback, os.getppid())
+    if hidden == True:
+        hidden = False
+    else:
+        hidden = True
+
+col_bg = "black"
+col_fg = "white"
+
+master = Tk()
+master.title("EdnaldoBot")
+master.geometry("1280x720")
+frame1 = Frame(
+    master = master,
+    bg = '#4a698a'
+)
+frame1.pack(fill='both', expand='yes')
+
+stxt = ScrolledText.ScrolledText(frame1, bg=col_bg, fg=col_fg)
+stxt.pack(padx=50, pady=45, fill=BOTH, expand=True)
+
+btnHide = tkinter.Button(frame1, text="mostrar console", command=HideUnHide)
+btnHide.place(x=550, y=685)
+
+btnClear = tkinter.Button(frame1, text="limpar console", command=clear)
+btnClear.place(x=650, y=685)
+
 
 def tasuave():
     x = 10
@@ -86,7 +248,7 @@ def is_bot(seraqbot):
         return True
     if not seraqbot.bot:
         return False
-    
+
 engine = pyttsx3.init()
 engine.setProperty('volume', 1)
 
@@ -126,15 +288,31 @@ class Watcher:
         # return SpotifyClient.SpotifyClient.get_last_added(self.value)
         return SpotifyClient.SpotifyClient.get_last_added(self.value)
 
-# Create an instance of spotifyclient with client_id, client_secret and the spotify playlist uri
-spotifyclient = SpotifyClient.SpotifyClient(os.environ['CLIENT_ID'], os.environ['CLIENT_SECRET'], os.environ['PLAYLIST_URI'])
+    #tirar o tab desses comentários de baixo caso for implementar essa parte
 
-# Create an instance of Watcher with the initial "old" value parameter
-watcher = Watcher(spotifyclient.get_playlist_tracks(spotifyclient.username, spotifyclient.playlist_id))
+    # Create an instance of spotifyclient with client_id, client_secret and the spotify playlist uri
+    spotifyclient = SpotifyClient.SpotifyClient(os.environ['CLIENT_ID'], os.environ['CLIENT_SECRET'], os.environ['PLAYLIST_URI'])
 
-# instanciate the discord client
-discordclient = discord.Client()
-'''
+    # Create an instance of Watcher with the initial "old" value parameter
+    watcher = Watcher(spotifyclient.get_playlist_tracks(spotifyclient.username, spotifyclient.playlist_id))
+
+    # instanciate the discord client
+    discordclient = discord.Client()
+    '''
+
+class RealTimeCurrencyConverter():
+    def __init__(self,url):
+            self.data = requests.get(url).json()
+            self.currencies = self.data['rates']
+
+    def convert(self, from_currency, to_currency, amount): 
+        initial_amount = amount 
+        if from_currency != 'USD' : 
+            amount = round(float(amount) / self.currencies[from_currency], 4) 
+  
+        # limiting the precision to 4 decimal places 
+        amount = round(float(amount) * self.currencies[to_currency], 4) 
+        return amount
 
 
 class YTDLSource(discord.PCMVolumeTransformer):
@@ -444,7 +622,7 @@ class VoiceState:
 
 class Music(commands.Cog):
     
-    idioma = ''
+    idioma = 'por'
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -477,72 +655,124 @@ class Music(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message):
 
+        ednaldoHelp = '''/EdnaldoBot>```'''
+
         ''' turn this on to get a channels' id
         with open("text/channels.txt", "w", encoding='utf-8') as file:
             escrever = f"{message.channel}/{message.author.name}> {message.channel.id}/{message.author.id}"
             file.write(escrever)
         '''
              
-        if message.author.id == 789455654896009226 and message.content.lower() == "uga buga":
+        if message.author.id == 789455654896009226 and "uga" in message.content.lower() and "buga" in message.content.lower():
             await message.delete()
+            
         
         if message.author == client.user or message.author == bot.user: #prints any message in any server the bot is in
-            print(f"{message.guild}/{message.channel}/{message.author.name}>{message.content}")
+            mensagem = f"{message.guild}/{message.channel}/{message.author.name}>{message.content} "
+            extra = ' '
+            try:
+                extra += str(message.attachments[0].url)
+            except:
+                extra = ''
+            mensagem += extra
+            mensage = mensagem + '\n'
+            if not ednaldoHelp in mensage:
+                stxt.insert(END, mensage)
+
+            #print(mensagem)
+
         if is_bot(message.author) == False:
-            print(f"{message.guild}/{message.channel}/{message.author.name}>{message.content}")
+            mensagem = f"{message.guild}/{message.channel}/{message.author.name}>{message.content}"
+            extra = ' '
+            try:
+                extra += str(message.attachments[0].url)
+            except:
+                extra = ''
+            mensagem += extra
+            mensage = mensagem + '\n'
+            stxt.insert(END, mensage)
+            #print(mensagem)
             
-            if message.embeds:
-                print(message.embeds[0].to_dict())
+            #if message.embeds:
+                #print(message.embeds[0].to_dict())
                 
             if message.author.id != bot.user.id:
                 emoji = bot.get_emoji(756510157441204244)
                 
                 if message.content.startswith('ednaldo?'):
-                    await message.channel.send('pereira')
+                    async with message.channel.typing():
+                        await message.reply('pereira')
 
                 if message.content.startswith('oi ednaldo'): #says hello back
-                    await message.channel.send(f'oi <@!{message.author.id}>')
+                    async with message.channel.typing():
+                        await message.reply(f'oi {message.author.name}')
 
                 if message.content.startswith('hmmm'): 
-                    await message.channel.send("https://tenor.com/view/ednaldo-pereira-vision%c3%a1rio-peep-gif-14849212")
+                    async with message.channel.typing():
+                        await message.channel.send("https://tenor.com/view/ednaldo-pereira-vision%c3%a1rio-peep-gif-14849212")
 
                 if 'brabo' in message.content or 'pog' in message.content:  #adds a ednaldo pereira poggers emote reaction to a "pog" or "awesome" message
-                    await message.add_reaction(emoji)
+                    try:
+                        await message.add_reaction(emoji)
+                    except:
+                        tasuave()
                 
                         
                 if '518118209073971220' in message.content or '<@!518118209073971220>' in message.content: #randomly insults a specific user whenever he is pinged
                     decisao = randint(0,9)
                     if decisao == 1:
-                        await message.channel.send('esse saco de bosta')
+                        await message.reply('esse saco de bosta')
 
                 if 'tenor.com/view/' in message.content or '.gif' in message.content and 'media.discordapp.net' in message.content or 'giphy.com/gifs/' in message.content: #randomly judges a gif sent in any channel
                     simounao = randint(0, 10)
                     falar = randint(0,9)
                     if falar == 1 or falar == 2:
                         if (message.author.id == 518118209073971220):
-                            await message.channel.send("<@!518118209073971220> O adm pede que você o mame")
+                            async with message.channel.typing():
+                                await message.reply("<@!518118209073971220> O adm pede que você o mame")
                         if not (message.author.id == 518118209073971220):
                             if simounao < 5:
-                                await message.channel.send('gif legal')
+                                async with message.channel.typing():
+                                    await message.reply('gif legal')
                             if simounao > 5:
-                                await message.channel.send('gif ruim')
+                                async with message.channel.typing():
+                                    await message.reply('gif ruim')
                             if simounao == 5:
-                                await message.channel.send(':thinking:')
+                                async with message.channel.typing():
+                                    await message.reply(':thinking:')
 
-                if message.content.startswith.lower('pequeno dia') or message.content.startswith.lower('small day'): #adds a sad reaction to a message with "small day"
-                    await message.channel.send(':cry:')
+                if message.content.startswith('pequeno dia') or message.content.startswith('small day'): #adds a sad reaction to a message with "small day"
+                    async with message.channel.typing():
+                        await message.channel.send(':cry:')
 
-                if message.content.startswith.lower('grande dia') or message.content.startswith.lower('big day'): #adds a sunglasses reaction to a message with "big day"
-                    await message.channel.send(':sunglasses:')
+                if message.content.startswith('grande dia') or message.content.startswith('big day'): #adds a sunglasses reaction to a message with "big day"
+                    async with message.channel.typing():
+                        await message.channel.send(':sunglasses:')
 
-                if message.content.startswith('ednaldo leia'): #tries to read text in an image, doesn't always work
+                if message.content.startswith('ednaldo leia'): #tries to read text in an image, doesn't always work  
+                    try:
+                        response = message.attachments[0].url
+                        req = urllib.request.Request(response, None, hdr)
+                        resp = urllib.request.urlopen(req)
+                        image = np.asarray(bytearray(resp.read()),dtype="uint8")
+                        image = cv2.imdecode(image,cv2.IMREAD_COLOR)
+                        image = cv2.resize(image, None, fx=2,fy=2)
+                        gray = get_grayscale(image)
+                        text = pytesseract.image_to_string(gray, lang= self.idioma)
+                        await message.channel.send(text)
+                    except:
+                        await message.reply("teu cu")
+
+                    '''      
                     try:
                         response = requests.get(message.attachments[0].url)
                         img = Image.open(io.BytesIO(response.content))
-                        text = pytesseract.image_to_string(img, lang = self.idioma)
+                        text = pytesseract.image_to_string(img, lang= self.idioma)
                         await message.channel.send(text)
                     except:
-                        await message.channel.send('deu n')
+                        await message.channel.send("deu n")
+                    '''
+                    
 
 
     @commands.command(name='text_to_speech', aliases=['tts','text-to-speech'], help = 'cria um arquivo de audio e toca ele no canal de voz') #sends a tts file if the user is not in a voice channel, otherwise joins the chanel and plays the file
@@ -550,7 +780,7 @@ class Music(commands.Cog):
         text = ' '.join(texto)
         
         randomizado = randint(0,10)
-        engine.save_to_file(text, f'message{randomizado}.mp3')
+        engine.save_to_file(text, f'audio/message{randomizado}.mp3')
         engine.runAndWait()
         with open(f'audio/message{randomizado}.mp3', 'rb') as file:
             await ctx.message.delete()
@@ -563,23 +793,28 @@ class Music(commands.Cog):
                 await asyncio.sleep(1)
 
                 destination = ctx.author.voice.channel
-                
+                    
                 if ctx.voice_state.voice:
                     await ctx.voice_state.voice.move_to(destination)
-                    return
 
-                ctx.voice_state.voice = await destination.connect()
-                
-                ctx.voice_state.voice.play(discord.FFmpegPCMAudio(f'audio/message{randomizado}.mp3'))
+                try:
+                    ctx.voice_state.voice = await destination.connect()
 
-                audio = audioread.audio_open(f'audio/message{randomizado}.mp3')
-                
-                seconds = audio.duration
-                print(seconds)
-                await asyncio.sleep(seconds)
-                
-                await ctx.voice_state.stop()
-                del self.voice_states[ctx.guild.id]
+                    await asyncio.sleep(2)    
+
+                    ctx.voice_state.voice.play(discord.FFmpegPCMAudio(f'audio/message{randomizado}.mp3'))
+
+                    audio = audioread.audio_open(f'audio/message{randomizado}.mp3')
+                        
+                    seconds = audio.duration
+                    print(seconds)
+                    await asyncio.sleep(seconds+2)
+                        
+                    await ctx.voice_state.stop()
+                    del self.voice_states[ctx.guild.id]
+
+                except:
+                    await ctx.send('deu erro em alguma coisa, avisa o adm')
                     
             
                 
@@ -645,7 +880,7 @@ class Music(commands.Cog):
        
 
     @commands.command(name='apareça')
-    @commands.has_permissions(manage_guild=True) 
+    @commands.has_role("DJ")
     async def _summon(self, ctx: commands.Context, *, channel: discord.VoiceChannel = None): #bot joins specified voice channel
         """Summons the bot to a voice channel.
         If no channel was specified, it joins your channel.
@@ -662,7 +897,7 @@ class Music(commands.Cog):
         ctx.voice_state.voice = await destination.connect()
 
     @commands.command(name='saia', aliases=['vaza']) #bot leaves the voice channel
-    @commands.has_permissions(manage_guild=True)
+    @commands.has_role("DJ")
     async def _leave(self, ctx: commands.Context):
         """Clears the queue and leaves the voice channel."""
 
@@ -686,14 +921,14 @@ class Music(commands.Cog):
         ctx.voice_state.volume = volume / 100
         await ctx.send('Volume of the player set to {}%'.format(volume))
 
-    @commands.command(name='agora', aliases=['current', 'playing']) #shows what video is being played on voice channel
+    @commands.command(name='tocando', aliases=['current', 'playing', 'now', 'agora']) #shows what video is being played on voice channel
     async def _now(self, ctx: commands.Context):
         """Displays the currently playing song."""
         embed = ctx.voice_state.current.create_embed()
         await ctx.send(embed=embed)
 
-    @commands.command(name='pausa', aliases=['pa'], help = 'o q será q esse comando faz ne?') #pauses the bot
-    @commands.has_permissions(manage_guild=True)
+    @commands.command(name='pausa', aliases=['pause'], help = 'o q será q esse comando faz ne?') #pauses the bot
+    @commands.has_role("DJ")
     async def _pause(self, ctx: commands.Context):
         """Pauses the currently playing song."""
         print(">>>Pause Command:")
@@ -701,8 +936,8 @@ class Music(commands.Cog):
             ctx.voice_state.voice.pause()
             await ctx.message.add_reaction('⏯')
 
-    @commands.command(name='bov', aliases=['resume', 'volta'], help = 'despausa') #resumes the bot
-    @commands.has_permissions(manage_guild=True)
+    @commands.command(name='despausa', aliases=['resume', 'volta', 'bov'], help = 'despausa') #resumes the bot
+    @commands.has_role("DJ")
     async def _resume(self, ctx: commands.Context): 
         """Resumes a currently paused song."""
 
@@ -710,8 +945,8 @@ class Music(commands.Cog):
             ctx.voice_state.voice.resume()
             await ctx.message.add_reaction('⏯')
             
-    @commands.command(name='para')
-    @commands.has_permissions(manage_guild=True) #stops the bot
+    @commands.command(name='para', aliases=['stop'], help = "para de tocar musica")
+    @commands.has_role("DJ")
     async def _stop(self, ctx: commands.Context):
         """Stops playing song and clears the queue."""
 
@@ -721,32 +956,38 @@ class Music(commands.Cog):
             ctx.voice_state.voice.stop()
             await ctx.message.add_reaction('⏹')
 
-    @commands.command(name='pula', aliases=['s']) #skips a song
+    @commands.command(name='pula', aliases=['skip', 'passa']) #skips a song
     async def _skip(self, ctx: commands.Context):
         """Vote to skip a song. The requester can automatically skip.
         3 skip votes are needed for the song to be skipped.
         """
+        role = discord.utils.find(lambda r: r.name == 'DJ', ctx.message.guild.roles)
 
         if not ctx.voice_state.is_playing:
             return await ctx.send('não to tocando nada')
 
-        voter = ctx.message.author
-        if voter == ctx.voice_state.current.requester:
+        if role in ctx.author.roles:
             await ctx.message.add_reaction('⏭')
             ctx.voice_state.skip()
-
-        elif voter.id not in ctx.voice_state.skip_votes:
-            ctx.voice_state.skip_votes.add(voter.id)
-            total_votes = len(ctx.voice_state.skip_votes)
-
-            if total_votes >= 3:
+        
+        else:
+            voter = ctx.message.author
+            if voter == ctx.voice_state.current.requester:
                 await ctx.message.add_reaction('⏭')
                 ctx.voice_state.skip()
-            else:
-                await ctx.send('mais um voto, totalizando **{}/3**'.format(total_votes))
 
-        else:
-            await ctx.send('tu já votou')
+            elif voter.id not in ctx.voice_state.skip_votes:
+                ctx.voice_state.skip_votes.add(voter.id)
+                total_votes = len(ctx.voice_state.skip_votes)
+
+                if total_votes >= 3:
+                    await ctx.message.add_reaction('⏭')
+                    ctx.voice_state.skip()
+                else:
+                    await ctx.send('mais um voto, totalizando **{}/3**'.format(total_votes))
+
+            else:
+                await ctx.send('tu já votou')
 
     @commands.command(name='fila')
     async def _queue(self, ctx: commands.Context, *, page: int = 1): #show the queue
@@ -777,11 +1018,12 @@ class Music(commands.Cog):
 
         if len(ctx.voice_state.songs) == 0:
             return await ctx.send('fila vazia')
-
+    
         ctx.voice_state.songs.shuffle()
         await ctx.message.add_reaction('✅')
 
     @commands.command(name='remove')
+    @commands.has_role("DJ")
     async def _remove(self, ctx: commands.Context, index: int): #removes specified song from queue
         """Removes a song from the queue at a given index."""
 
@@ -869,7 +1111,94 @@ class Text(commands.Cog):
 
     def __init__(self, bot):
         self.bot = bot
+        self.pegou_dados = []
+        self.converter = RealTimeCurrencyConverter(url)
     
+    @commands.command(name='converte', aliases=['agiota', 'banqueiro', 'caixa'], help="converte uma quantidade de dinheiro de uma moeda para outra")
+    async def _convert(self, ctx, cur_from, amount, cur_dest):
+        async with ctx.typing():
+            convertido = self.converter.convert(cur_from.upper(), cur_dest.upper(), amount)
+            if cur_dest.upper() == "BRL":
+                mensagem = locale.currency(float(convertido), grouping = True) + ' ' + str(cur_dest.lower())
+            if cur_dest.upper() != "BRL":
+                mensagem = str("${:,.2f}".format(float(convertido)) + ' ' + str(cur_dest.lower()))
+        await ctx.reply(f'{mensagem}', mention_author=False)
+    
+    @commands.command(name="importação", aliases=['importa'], help="calcula o preço total de um produto importado")
+    async def _imposto(self, ctx, valor, *moeda: str):
+        cur = ' '.join(moeda)
+        if cur.upper() == "USD":
+            preco = self.converter.convert("USD", "BRL", valor)
+        if cur.upper() != "USD":
+            preco = valor
+        resultado = float(preco) * 1.6
+        mensagem = locale.currency(float(resultado), grouping = True)
+        
+        
+        await ctx.reply(f'{mensagem} reais', mention_author = False)
+
+    @commands.command(name='calcula', aliases=['calculadora', 'calculador', 'calculo', 'calculate'], help="realiza um cálculo")
+    async def _calculadora(self, ctx, valor1: float, op: str, *val2: str):
+        valor2 = float(' '.join(val2))
+        async with ctx.typing():
+            try:
+                switcher = {
+                '√': 0,
+                'raiz': 0,
+                '+': 1,
+                'soma': 1,
+                'adicao': 1,
+                'adição': 1,
+                '-': 2,
+                'subtração': 2,
+                'subtraçao': 2,
+                'subtracao': 2,
+                'potência': 3,
+                'potencia': 3,
+                '^': 3,
+                '/': 4,
+                'divisão': 4,
+                'divisao': 4,
+                '*': 5,
+                'multiplicação': 5,
+                'multiplicacao': 5,
+                'multiplicaçao': 5
+                }
+                escolha = switcher.get(op)
+            except:
+                await ctx.send('🤨')
+            try:
+                
+                if op in switcher:
+                    if escolha == 0:
+                        #raiz
+                        resultado = valor1 ** (1. /valor2)
+
+                    if escolha == 1:
+                        #soma
+                        resultado = valor1 + valor2
+
+                    if escolha == 2:
+                        #subtração
+                        resultado = valor1 - valor2
+
+                    if escolha == 3:
+                        #potência
+                        resultado = valor1 ** valor2
+
+                    if escolha == 4:
+                        #divisão
+                        resultado = valor1 / valor2
+
+                    if escolha == 5:
+                        #multiplicação
+                        resultado = valor1 * valor2
+
+                    mensagem = locale.currency(float(resultado), grouping = True)
+                    await ctx.reply(f'{mensagem}', mention_author=False)
+                
+            except:
+                await ctx.send("🤨")
     
     @commands.command(name='traduz', aliases=['translate', 'trans'], help='traduz texto para português') #translates text
     async def _trans(self, ctx, *toTrans: str):
@@ -891,25 +1220,27 @@ class Text(commands.Cog):
     @commands.command(name='twitter', aliases=['twtr','twt'], help = 'mostra a conta do usuário especificado') #searches specified twitter user
     async def _twitter(self, ctx, usera):
         if 'ednaldo' in usera:
-            user = api.get_user('oednaldopereira')
-            link = 'https://twitter.com/' + user.screen_name
-            embed=discord.Embed(title='Perfil', url = link, description='Perfil do twitter')
-            embed.set_thumbnail(url=user.profile_image_url.replace('_normal', ''))
-            embed.add_field(name='Nome', value=user.name, inline=True)
-            embed.add_field(name='Descrição', value=user.description, inline=False)
-            embed.add_field(name='Quantidade de seguidores', value=user.followers_count, inline=True)
-            embed.add_field(name='Quantidade de tweets', value=user.statuses_count, inline=True)
-            await ctx.send(embed=embed)
-        else:
-            try:
-                user = api.get_user(usera)
+            async with ctx.typing():
+                user = api.get_user('oednaldopereira')
                 link = 'https://twitter.com/' + user.screen_name
-                embed=discord.Embed(title='Perfil',url=link, description='Perfil do twitter')
+                embed=discord.Embed(title='Perfil', url = link, description='Perfil do twitter')
                 embed.set_thumbnail(url=user.profile_image_url.replace('_normal', ''))
                 embed.add_field(name='Nome', value=user.name, inline=True)
                 embed.add_field(name='Descrição', value=user.description, inline=False)
                 embed.add_field(name='Quantidade de seguidores', value=user.followers_count, inline=True)
                 embed.add_field(name='Quantidade de tweets', value=user.statuses_count, inline=True)
+                await ctx.send(embed=embed)
+        else:
+            try:
+                async with ctx.typing():
+                    user = api.get_user(usera)
+                    link = 'https://twitter.com/' + user.screen_name
+                    embed=discord.Embed(title='Perfil',url=link, description='Perfil do twitter')
+                    embed.set_thumbnail(url=user.profile_image_url.replace('_normal', ''))
+                    embed.add_field(name='Nome', value=user.name, inline=True)
+                    embed.add_field(name='Descrição', value=user.description, inline=False)
+                    embed.add_field(name='Quantidade de seguidores', value=user.followers_count, inline=True)
+                    embed.add_field(name='Quantidade de tweets', value=user.statuses_count, inline=True)
                 await ctx.send(embed=embed)
             except:
                 await ctx.send("NA usuário")
@@ -923,50 +1254,52 @@ class Text(commands.Cog):
     async def _trending(self, ctx, *tulipa: str):                                                                                               # in this case, brazil's trending topics
         filtro = ' '.join(tulipa).lower()
         if 'brasil' in filtro or 'brazil' in filtro or filtro == '':
-            trends = []
-            nome = []
-            volume = []
-            nomes = []
-            volu = []
-            final = []
-            aurelio ={}
+            async with ctx.typing():
+                trends = []
+                nome = []
+                volume = []
+                nomes = []
+                volu = []
+                final = []
+                aurelio ={}
 
-            nomez = []
-            tuites = []
-            nfinal = []
-            vfinal = []
-            lfinal = {}
-            brazil_trends = api.trends_place(BRAZIL_WOE_ID)
-            trends = json.loads(json.dumps(brazil_trends, indent=1))
-            for trend in trends[0]["trends"]:
-                nomez.append(trend['name'])
-                tuites.append(trend['tweet_volume'])
-            
-            #might want to sort topics based on amount of tweets, although unfiltered seems (or at least, seemed at the time) to work best
+                nomez = []
+                tuites = []
+                nfinal = []
+                vfinal = []
+                lfinal = {}
+                brazil_trends = api.trends_place(BRAZIL_WOE_ID)
+                trends = json.loads(json.dumps(brazil_trends, indent=1))
+                for trend in trends[0]["trends"]:
+                    nomez.append(trend['name'])
+                    tuites.append(trend['tweet_volume'])
+                
+                #might want to sort topics based on amount of tweets, although unfiltered seems (or at least, seemed at the time) to work best
 
-            embed=discord.Embed(title="Trending Topics", url="https://twitter.com/explore/tabs/trending", description="Assuntos que estão dando o que falar")
-            embed.set_thumbnail(url="https://img.pngio.com/fichiertwitter-birdsvg-wikipedia-twitter-logo-png-738_600.png")
-            embed.add_field(name=nomez[0], value=tuites[0], inline=True)
-            embed.add_field(name=nomez[1], value=tuites[1], inline=True)
-            embed.add_field(name=nomez[2], value=tuites[2], inline=True)
-            embed.add_field(name=nomez[3], value=tuites[3], inline=True)
-            embed.add_field(name=nomez[4], value=tuites[4], inline=True)
-            embed.add_field(name=nomez[5], value=tuites[5], inline=True)
-            embed.add_field(name=nomez[6], value=tuites[6], inline=True)
-            embed.add_field(name=nomez[7], value=tuites[7], inline=True)
-            embed.add_field(name=nomez[8], value=tuites[8], inline=True)
-            embed.add_field(name=nomez[9], value=tuites[9], inline=True)
+                embed=discord.Embed(title="Trending Topics", url="https://twitter.com/explore/tabs/trending", description="Assuntos que estão dando o que falar")
+                embed.set_thumbnail(url="https://img.pngio.com/fichiertwitter-birdsvg-wikipedia-twitter-logo-png-738_600.png")
+                embed.add_field(name=nomez[0], value=tuites[0], inline=True)
+                embed.add_field(name=nomez[1], value=tuites[1], inline=True)
+                embed.add_field(name=nomez[2], value=tuites[2], inline=True)
+                embed.add_field(name=nomez[3], value=tuites[3], inline=True)
+                embed.add_field(name=nomez[4], value=tuites[4], inline=True)
+                embed.add_field(name=nomez[5], value=tuites[5], inline=True)
+                embed.add_field(name=nomez[6], value=tuites[6], inline=True)
+                embed.add_field(name=nomez[7], value=tuites[7], inline=True)
+                embed.add_field(name=nomez[8], value=tuites[8], inline=True)
+                embed.add_field(name=nomez[9], value=tuites[9], inline=True)
             await ctx.send(embed=embed)
         else:
             await ctx.send('sla sio, só sei as coisa do brasil')
 
     @commands.command(name='youtube', aliases=['yt'], help = 'pesquisa um vídeo no youtube') #searches a single specific video on youtube
     async def musica(self, ctx, *contexto: str):
-        frase = ' '.join(contexto)
-        pesquisa = frase.replace(' ', '+')
-        html = urllib.request.urlopen(f"https://www.youtube.com/results?search_query={pesquisa}")
-        video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode())
-        video = 'https://www.youtube.com/watch?v=' + video_ids[0]
+        async with ctx.typing():
+            frase = ' '.join(contexto)
+            pesquisa = frase.replace(' ', '+')
+            html = urllib.request.urlopen(f"https://www.youtube.com/results?search_query={pesquisa}")
+            video_ids = re.findall(r"watch\?v=(\S{11})", html.read().decode())
+            video = 'https://www.youtube.com/watch?v=' + video_ids[0]
         await ctx.send(video)
 
     @commands.command(name='caulezada', aliases=['caule', 'pica', 'caules'], help = 'responde com um caule aleatório') #sends a nsfw copypasta
@@ -997,45 +1330,46 @@ class Text(commands.Cog):
 
     @commands.command(name='composição', aliases=['comp'], help= 'escolhe uma determinada quantidade de champs e suas lanes') #chooses champions and lanes for a league of legends team
     async def _comp(self, ctx, *quanti: str):
-        author = ctx.message.author
-        pfp = author.avatar_url
-        try:
-            quanti = tuple(map(int, quanti))
-            quant = quanti[0]
-            with open('text/lanes.txt', 'r', encoding='utf-8') as caminho:
-                with open('text/champs.txt', 'r', encoding='utf-8') as bonecao:
-                    lane = caminho.readlines()
-                    nome = bonecao.readlines()
-                    i = 0
-                    num_champ = []
-                    num_lane = []
-                    jafoilane = []
-                    jafoichamp = []     
-                    embed=discord.Embed(title='Timão', description='Composição do time ae')
-                    embed.set_author(name=author.display_name, icon_url=pfp)
-                    embed.set_thumbnail(url='https://pbs.twimg.com/media/ET2jVamXYAACtN7.jpg')
-                    num_champ = aleatorios(len(nome), int(quant), 0)
-                    num_lane = aleatorios(len(lane), int(quant), 0)
-                    repete = int(quant)
-                    if repete == 0:
-                        embed.add_field(name='_', value='_', inline=False)
-                        embed.set_footer(text="time ficou foda né arrombado")
-                    for i in range(int(repete)):
-                        linha1 = num_champ[i]
-                        linha2 = num_lane[i]
-                        embed.add_field(name=lane[linha2], value=nome[linha1], inline=True)
-                        jafoilane.append(linha2)
-                        jafoichamp.append(linha1)
-        except:
-            embed=discord.Embed(title='Timão', description='Composição do time ae')
-            embed.set_author(name=author.display_name, icon_url=pfp)
-            embed.set_thumbnail(url='https://pbs.twimg.com/media/ET2jVamXYAACtN7.jpg')
-            embed.add_field(name='_', value='_', inline=True)
-            embed.add_field(name='_', value='_', inline=True)
-            embed.add_field(name='_', value='_', inline=True)
-            embed.add_field(name='_', value='_', inline=True)
-            embed.add_field(name='_', value='_', inline=True)
-            embed.set_footer(text="time ficou foda né arrombado")
+        async with ctx.typing():
+            author = ctx.message.author
+            pfp = author.avatar_url
+            try:
+                quanti = tuple(map(int, quanti))
+                quant = quanti[0]
+                with open('text/lanes.txt', 'r', encoding='utf-8') as caminho:
+                    with open('text/champs.txt', 'r', encoding='utf-8') as bonecao:
+                        lane = caminho.readlines()
+                        nome = bonecao.readlines()
+                        i = 0
+                        num_champ = []
+                        num_lane = []
+                        jafoilane = []
+                        jafoichamp = []     
+                        embed=discord.Embed(title='Timão', description='Composição do time ae')
+                        embed.set_author(name=author.display_name, icon_url=pfp)
+                        embed.set_thumbnail(url='https://pbs.twimg.com/media/ET2jVamXYAACtN7.jpg')
+                        num_champ = aleatorios(len(nome), int(quant), 0)
+                        num_lane = aleatorios(len(lane), int(quant), 0)
+                        repete = int(quant)
+                        if repete == 0:
+                            embed.add_field(name='_', value='_', inline=False)
+                            embed.set_footer(text="time ficou foda né arrombado")
+                        for i in range(int(repete)):
+                            linha1 = num_champ[i]
+                            linha2 = num_lane[i]
+                            embed.add_field(name=lane[linha2], value=nome[linha1], inline=True)
+                            jafoilane.append(linha2)
+                            jafoichamp.append(linha1)
+            except:
+                embed=discord.Embed(title='Timão', description='Composição do time ae')
+                embed.set_author(name=author.display_name, icon_url=pfp)
+                embed.set_thumbnail(url='https://pbs.twimg.com/media/ET2jVamXYAACtN7.jpg')
+                embed.add_field(name='_', value='_', inline=True)
+                embed.add_field(name='_', value='_', inline=True)
+                embed.add_field(name='_', value='_', inline=True)
+                embed.add_field(name='_', value='_', inline=True)
+                embed.add_field(name='_', value='_', inline=True)
+                embed.set_footer(text="time ficou foda né arrombado")
 
         await ctx.send(embed=embed)
 
@@ -1072,8 +1406,9 @@ class Text(commands.Cog):
 
     @commands.command(name='pesquisa', help='pesquisa no google') #googles something
     async def searchzada(self, ctx, *pesq: str):
-        search = ' '.join(pesq)
-        pesquisa = googleSearch(str(search), num_results=1, lang="pt-br")[0]
+        async with ctx.typing():
+            search = ' '.join(pesq)
+            pesquisa = googleSearch(str(search), num_results=1, lang="pt-br")[0]
         await ctx.send(pesquisa)
 
     @commands.command(name='responda', help = 'responde uma pergunta') #answers a question like a magic 8 ball, might want to change answers to preferred language
@@ -1162,11 +1497,11 @@ class Text(commands.Cog):
         else:
             simounao = randint(0,10)
             if simounao > 5:
-                await message.channel.send(':thumbsdown:')
+                await ctx.send(':thumbsdown:')
             if simounao < 5:
-                await message.channel.send(':thumbsup:')
+                await ctx.send(':thumbsup:')
             if simounao == 5:
-                await message.channel.send(':thinking: não sei')
+                await ctx.send(':thinking: não sei')
     
     @commands.command(help = 'escolhe entre dois números') #chooses random number between two specified numbers
     async def entre(self, ctx, *numero: str):
@@ -1206,10 +1541,10 @@ class Image(commands.Cog):
     @commands.command(name='leia', aliases=['ler'], help="lê o texto em uma foto") #tries to read text in image
     async def _ler(self, ctx, *lang:str):
         idiom = ' '.join(lang)
-        if 'pt' in idiom:
-            self.idioma = 'por'
-        else:
+        if 'eng' in idiom:
             self.idioma = 'eng'
+        else:
+            self.idioma = 'por'
 
 bot = commands.Bot(command_prefix='ednaldo ', case_insensitive=True, description="Ednaldo Pereira")
 bot.add_cog(Music(bot))
@@ -1226,18 +1561,50 @@ async def on_command_error(ctx, error):
     if not isinstance(ctx.channel, discord.channel.DMChannel):
         if isinstance(error, CommandNotFound):
             with open('text/ednaldo.txt', 'r', encoding='utf-8') as frase:
-                leia = randint(0,29)
                 linha = frase.readlines()
+                leia = randint(0,len(linha)-1)
                 await ctx.send(linha[leia])
                 frase.close()
             return
         raise error
 
+@bot.command(description="echo pro dev")
+async def echo(ctx, id:int, *mensagem:str):
+    if ctx.message.author.id == 392350379716771840:
+        falar = ' '.join(mensagem)
+        channel = bot.get_channel(id)
+        await channel.send(falar)
+    else:
+        await ctx.send("só o ademir do bot pode usar esse comando")
+
+@bot.command(name="vsf", help="comando exclusivo pro adm")
+@commands.is_owner()
+async def _vsf(ctx, *mensagem:str):
+    if ctx.author.id == 392350379716771840:
+        falar = ' '.join(mensagem)
+        await ctx.message.delete()
+        channel = bot.get_channel(451814992862248965)
+        await channel.send(falar)
+    else:
+        await ctx.send("só o ademir do bot pode usar esse comando")
+
 @bot.command(name='tchau', aliases=['bstop'])
 @commands.is_owner()
 async def botstop(ctx):
     await ctx.send('tchau')
-    await bot.logout()
+    await bot.close()
     return
 
-bot.run(safeConf['discord']['token'])
+async def terminateBot():
+    await bot.close()
+
+def runBot():
+    bot.run(safeConf['discord']['token'])
+
+rb = threading.Thread(target=runBot)
+rb.start()
+
+
+
+master.protocol("WM_DELETE_WINDOW", terminateBot)
+master.mainloop()
